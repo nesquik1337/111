@@ -5,6 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Iterable
 
 
 @dataclass
@@ -71,6 +72,8 @@ class Storage:
                     is_active INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (group_id) REFERENCES groups (id)
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS requests (
@@ -135,11 +138,22 @@ class Storage:
                 return None
             conn.execute("UPDATE users SET group_id = ? WHERE user_id = ?", (group["id"], user_id))
             return Group(id=group["id"], name=group["name"], invite_code=group["invite_code"])
+    def create_request(self, creator_id: int, game: str, play_time: str) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO requests(creator_id, game, play_time, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (creator_id, game, play_time, datetime.utcnow().isoformat()),
+            )
+            return int(cur.lastrowid)
 
     def get_user(self, user_id: int) -> User | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT user_id, username, full_name, group_id FROM users WHERE user_id = ?",
+                "SELECT user_id, username, full_name FROM users WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
             if not row:
@@ -180,6 +194,20 @@ class Storage:
                 (user_id, user_id),
             ).fetchall()
             return [User(r["user_id"], r["username"], r["full_name"], r["group_id"]) for r in rows]
+            return User(row["user_id"], row["username"], row["full_name"])
+
+    def get_other_users(self, user_id: int) -> list[User]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT user_id, username, full_name
+                FROM users
+                WHERE user_id != ? AND is_active = 1
+                ORDER BY full_name ASC
+                """,
+                (user_id,),
+            ).fetchall()
+            return [User(r["user_id"], r["username"], r["full_name"]) for r in rows]
 
     def save_response(self, request_id: int, user_id: int, response: str) -> None:
         with self._connect() as conn:
@@ -200,6 +228,7 @@ class Storage:
                 """
                 SELECT r.id, r.creator_id, u.full_name AS creator_name, u.group_id AS creator_group_id,
                        r.game, r.play_time, r.created_at
+                SELECT r.id, r.creator_id, u.full_name AS creator_name, r.game, r.play_time, r.created_at
                 FROM requests r
                 JOIN users u ON u.user_id = r.creator_id
                 WHERE r.id = ?
@@ -247,6 +276,7 @@ class Storage:
                 """
                 SELECT r.id, r.creator_id, u.full_name AS creator_name, u.group_id AS creator_group_id,
                        r.game, r.play_time, r.created_at
+                SELECT r.id, r.creator_id, u.full_name AS creator_name, r.game, r.play_time, r.created_at
                 FROM requests r
                 JOIN users u ON u.user_id = r.creator_id
                 WHERE r.creator_id = ?

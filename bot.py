@@ -17,6 +17,10 @@ from aiogram.types import (
     Message,
     ReplyKeyboardMarkup,
 )
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from dotenv import load_dotenv
 
 from storage import Storage
@@ -160,6 +164,14 @@ async def my_group(message: Message) -> None:
 
 @router.message(Command("new_request"))
 @router.message(F.text == "➕ Новая заявка")
+        "Привет! Я помогу собрать тиммейта для игры.\n\n"
+        "Команды:\n"
+        "/new_request — создать заявку\n"
+        "/my_requests — мои последние заявки и статусы\n"
+    )
+
+
+@router.message(Command("new_request"))
 async def new_request(message: Message, state: FSMContext) -> None:
     user = message.from_user
     if user is None:
@@ -187,6 +199,8 @@ async def choose_game_from_button(callback: CallbackQuery, state: FSMContext) ->
     await state.set_state(CreateRequestFlow.entering_time)
     await callback.answer("Игра выбрана")
     await callback.message.reply(f"Игра: {game}\nТеперь укажи время (например: Сегодня 21:30).")
+    await state.set_state(CreateRequestFlow.choosing_game)
+    await message.answer("Какую игру ищешь? Напиши название (например: Dota 2, CS2, Valorant).")
 
 
 @router.message(CreateRequestFlow.choosing_game)
@@ -228,6 +242,11 @@ async def entered_time(message: Message, state: FSMContext, bot: Bot) -> None:
     await state.clear()
 
     creator_label = mention_or_name(user.username, user.full_name)
+    request_id = storage.create_request(user.id, game, play_time)
+    await state.clear()
+
+    creator = storage.get_user(user.id)
+    creator_label = mention_or_name(creator.username if creator else user.username, user.full_name)
     text = (
         f"🎮 Новая заявка #{request_id}\n"
         f"Кто: {creator_label}\n"
@@ -237,6 +256,7 @@ async def entered_time(message: Message, state: FSMContext, bot: Bot) -> None:
     )
 
     recipients = storage.get_other_users_in_same_group(user.id)
+    recipients = storage.get_other_users(user.id)
     sent_count = 0
     for recipient in recipients:
         try:
@@ -247,6 +267,7 @@ async def entered_time(message: Message, state: FSMContext, bot: Bot) -> None:
 
     await message.answer(
         f"Заявка #{request_id} создана в группе. Уведомления отправлены: {sent_count}.\n"
+        f"Заявка #{request_id} создана. Уведомления отправлены: {sent_count} пользователям.\n"
         "Проверить ответы: /my_requests"
     )
 
